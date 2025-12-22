@@ -87,6 +87,135 @@ See [shared-patterns/shared-orchestrator-principle.md](../shared-patterns/shared
 
 **Summary:** You orchestrate. Agents execute. If using Read/Write/Edit/Bash on source code → STOP. Dispatch agent.
 
+## ⛔ ORCHESTRATOR BOUNDARIES (HARD GATE)
+
+**This section defines exactly what the orchestrator CAN and CANNOT do.**
+
+### What Orchestrator CAN Do (PERMITTED)
+
+| Action | Tool | Purpose |
+|--------|------|---------|
+| Read task files | `Read` | Load task definitions from `docs/pre-dev/*/tasks.md` |
+| Read state files | `Read` | Load/verify `docs/refactor/current-cycle.json` |
+| Read PROJECT_RULES.md | `Read` | Load project-specific rules |
+| Write state files | `Write` | Persist cycle state to JSON |
+| Track progress | `TodoWrite` | Maintain task list |
+| Dispatch agents | `Task` | Send work to specialist agents |
+| Ask user questions | `AskUserQuestion` | Get execution mode, approvals |
+| WebFetch standards | `WebFetch` | Load Ring standards |
+
+### What Orchestrator CANNOT Do (FORBIDDEN)
+
+| Action | Tool | Why FORBIDDEN |
+|--------|------|---------------|
+| Read source code | `Read` on `*.go`, `*.ts`, `*.tsx` | Agent reads code, not orchestrator |
+| Write source code | `Write`/`Create` on `*.go`, `*.ts` | Agent writes code, not orchestrator |
+| Edit source code | `Edit` on `*.go`, `*.ts`, `*.tsx` | Agent edits code, not orchestrator |
+| Run tests | `Execute` with `go test`, `npm test` | Agent runs tests in TDD cycle |
+| Analyze code | Direct pattern analysis | `codebase-explorer` analyzes |
+| Make architectural decisions | Choosing patterns/libraries | User decides, agent implements |
+
+### The 3-FILE RULE
+
+**If a task requires editing MORE than 3 files → MUST dispatch specialist agent.**
+
+This is NOT negotiable:
+- 1-3 files of non-source content (markdown, json, yaml) → Orchestrator MAY edit directly
+- 1+ source code files (`*.go`, `*.ts`, `*.tsx`) → MUST dispatch agent
+- 4+ files of ANY type → MUST dispatch agent
+
+### Orchestrator Workflow Order (MANDATORY)
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│  CORRECT WORKFLOW ORDER                                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. Load task file (Read docs/pre-dev/*/tasks.md)              │
+│  2. Ask execution mode (AskUserQuestion)                        │
+│  3. Check/Load state (Read docs/refactor/current-cycle.json)   │
+│  4. WebFetch Ring Standards                                     │
+│  5. ⛔ DISPATCH SPECIALIST AGENT ← Immediate after standards   │
+│  6. Wait for agent completion                                   │
+│  7. Verify agent output (Standards Coverage Table)              │
+│  8. Update state (Write to JSON)                               │
+│  9. Proceed to next gate                                        │
+│                                                                 │
+│  ════════════════════════════════════════════════════════════   │
+│  ❌ WRONG: Load → Mode → Standards → [START CODING DIRECTLY]   │
+│  ✅ RIGHT: Load → Mode → Standards → DISPATCH AGENT → Wait     │
+│  ════════════════════════════════════════════════════════════   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Agent Dispatch is IMMEDIATE (HARD GATE)
+
+**The moment you identify the task language/type, dispatch the agent. No intermediate steps.**
+
+| Task Type | Immediate Action |
+|-----------|------------------|
+| Go implementation | `Task(subagent_type="backend-engineer-golang", ...)` |
+| TypeScript backend | `Task(subagent_type="backend-engineer-typescript", ...)` |
+| React/Frontend | `Task(subagent_type="frontend-engineer", ...)` |
+| BFF layer | `Task(subagent_type="frontend-bff-engineer-typescript", ...)` |
+| Infrastructure | `Task(subagent_type="devops-engineer", ...)` |
+| Observability validation | `Task(subagent_type="sre", ...)` |
+| Testing | `Task(subagent_type="qa-analyst", ...)` |
+| Code review | 3 parallel: `code-reviewer`, `business-logic-reviewer`, `security-reviewer` |
+
+**Between "WebFetch standards" and "Dispatch agent" there should be ZERO other actions.**
+
+### Anti-Rationalization for Direct Coding
+
+| Rationalization | Why It's WRONG | Required Action |
+|-----------------|----------------|-----------------|
+| "It's just one small file" | File count doesn't determine agent need. Language does. | **DISPATCH specialist agent** |
+| "I already loaded the standards" | Loading standards ≠ permission to implement. Standards are for AGENTS. | **DISPATCH specialist agent** |
+| "Agent dispatch adds overhead" | Overhead ensures compliance. Skip = skip verification. | **DISPATCH specialist agent** |
+| "I can write Go/TypeScript" | Knowing language ≠ having Ring standards loaded. Agent has them. | **DISPATCH specialist agent** |
+| "Just a quick fix" | "Quick" is irrelevant. ALL source changes require specialist. | **DISPATCH specialist agent** |
+| "I'll read the file first to understand" | Reading source → temptation to edit. Agent reads for you. | **DISPATCH specialist agent** |
+| "Let me check if tests pass first" | Agent runs tests in TDD cycle. You don't run tests. | **DISPATCH specialist agent** |
+
+### Red Flags - Orchestrator Violation in Progress
+
+**If you catch yourself doing ANY of these, STOP IMMEDIATELY:**
+
+```text
+🚨 RED FLAG: About to Read *.go or *.ts file
+   → STOP. Dispatch agent instead.
+
+🚨 RED FLAG: About to Write/Create source code
+   → STOP. Dispatch agent instead.
+
+🚨 RED FLAG: About to Edit source code
+   → STOP. Dispatch agent instead.
+
+🚨 RED FLAG: About to run "go test" or "npm test"
+   → STOP. Agent runs tests, not you.
+
+🚨 RED FLAG: Thinking "I'll just..."
+   → STOP. "Just" is the warning word. Dispatch agent.
+
+🚨 RED FLAG: Thinking "This is simple enough..."
+   → STOP. Simplicity is irrelevant. Dispatch agent.
+
+🚨 RED FLAG: Standards loaded, but next action is NOT Task tool
+   → STOP. After standards, IMMEDIATELY dispatch agent.
+```
+
+### Recovery from Orchestrator Violation
+
+If you violated orchestrator boundaries:
+
+1. **STOP** current execution immediately
+2. **DISCARD** any direct changes (`git checkout -- .`)
+3. **DISPATCH** the correct specialist agent
+4. **Agent implements** from scratch following TDD
+5. **Document** the violation for feedback loop
+
+**Sunk cost of direct work is IRRELEVANT. Agent dispatch is MANDATORY.**
+
 ## Blocker Criteria - STOP and Report
 
 | Decision Type | Examples | Action |
@@ -855,20 +984,28 @@ Create tool:
   content: |
     # Project Rules
     
-    > Ring Standards apply automatically. This file documents ONLY what Ring does NOT cover.
-    > For error handling, logging, testing, architecture, lib-commons → See Ring Standards (auto-loaded by agents)
+    > ⛔ IMPORTANT: Ring Standards are NOT automatic. Agents MUST WebFetch them before implementation.
+    > This file documents ONLY project-specific information not covered by Ring Standards.
     > Generated from PM documents (PRD/TRD/Feature Map).
+    >
+    > Ring Standards URLs:
+    > - Go: https://raw.githubusercontent.com/LerianStudio/ring/main/dev-team/docs/standards/golang.md
+    > - TypeScript: https://raw.githubusercontent.com/LerianStudio/ring/main/dev-team/docs/standards/typescript.md
     
-    ## What Ring Standards Already Cover (DO NOT ADD HERE)
+    ## What Ring Standards Cover (DO NOT DUPLICATE HERE)
     
-    The following are defined in Ring Standards and MUST NOT be duplicated:
+    The following are defined in Ring Standards and MUST NOT be duplicated in this file:
     - Error handling patterns (no panic, wrap errors)
-    - Logging standards (structured JSON, zerolog/zap)
+    - Logging standards (structured JSON via lib-commons)
     - Testing patterns (table-driven tests, mocks)
     - Architecture patterns (Hexagonal, Clean Architecture)
-    - Observability (OpenTelemetry, trace correlation)
-    - lib-commons usage and patterns
-    - API directory structure
+    - Observability (OpenTelemetry via lib-commons)
+    - lib-commons / lib-common-js usage and patterns
+    - API directory structure (Midaz pattern)
+    - Database connections (PostgreSQL, MongoDB, Redis via lib-commons)
+    - Bootstrap pattern (config.go, service.go, server.go)
+    
+    **Agents MUST WebFetch Ring Standards and output Standards Coverage Table.**
     
     ---
     
@@ -1047,7 +1184,7 @@ See [shared-patterns/shared-orchestrator-principle.md](../shared-patterns/shared
 
 **Gate 0 has TWO explicit sub-phases with a HARD GATE between them:**
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │  GATE 0.1: TDD-RED                                              │
 │  ─────────────────                                              │
@@ -1094,7 +1231,7 @@ See [shared-patterns/shared-orchestrator-principle.md](../shared-patterns/shared
    ```
 
 8. **Display to user:**
-   ```
+   ```text
    ┌─────────────────────────────────────────────────┐
    │ ✓ TDD-RED COMPLETE                              │
    ├─────────────────────────────────────────────────┤
@@ -1141,7 +1278,7 @@ See [shared-patterns/shared-orchestrator-principle.md](../shared-patterns/shared
    ```
 
 6. **Display to user:**
-   ```
+   ```text
    ┌─────────────────────────────────────────────────┐
    │ ✓ GATE 0 COMPLETE (TDD-RED → TDD-GREEN)        │
    ├─────────────────────────────────────────────────┤
@@ -1152,7 +1289,135 @@ See [shared-patterns/shared-orchestrator-principle.md](../shared-patterns/shared
    └─────────────────────────────────────────────────┘
    ```
 
-7. **⛔ SAVE STATE TO FILE (MANDATORY):**
+7. **Proceed to Step 2.3 (Standards Compliance Verification)**
+
+### Step 2.3: Standards Compliance Verification (HARD GATE)
+
+**PREREQUISITE:** `gate_progress.implementation.tdd_green.status == "completed"`
+
+**Purpose:** Verify implementation follows ALL standards defined in agent's standards file.
+
+See [shared-patterns/template-tdd-prompts.md](../shared-patterns/template-tdd-prompts.md) → "Orchestrator Enforcement" section for full verification process.
+
+**Process:**
+
+### Step 2.3.1: Initialize Iteration Counter
+
+```text
+Set standards_compliance_iterations = 0
+Set MAX_ITERATIONS = 3
+```
+
+### Step 2.3.2: Verification Loop
+
+```text
+LOOP while standards_compliance_iterations < MAX_ITERATIONS:
+  
+  1. INCREMENT counter FIRST (before any verification):
+     standards_compliance_iterations += 1
+  
+  2. PARSE agent output for "## Standards Coverage Table":
+     IF NOT FOUND:
+       → Output INCOMPLETE
+       → Log: "Iteration [N]: Standards Coverage Table missing"
+       → Re-dispatch agent (see Step 2.3.3)
+       → CONTINUE loop
+  
+  3. PARSE "ALL STANDARDS MET:" value:
+     IF NOT FOUND:
+       → Output INCOMPLETE
+       → Log: "Iteration [N]: Compliance Summary missing"
+       → Re-dispatch agent (see Step 2.3.3)
+       → CONTINUE loop
+  
+  4. COUNT sections from Standards Coverage Table:
+     total_sections = count all rows
+     compliant = count rows with ✅
+     not_applicable = count rows with N/A
+     non_compliant = count rows with ❌
+  
+  5. VERIFY compliance:
+     IF "ALL STANDARDS MET: ✅ YES" AND non_compliant == 0:
+       → Gate 0 PASSED
+       → BREAK loop (proceed to Step 2.3.4)
+     
+     IF "ALL STANDARDS MET: ❌ NO" OR non_compliant > 0:
+       → Gate 0 BLOCKED
+       → Extract ❌ sections
+       → Log: "Iteration [N]: [non_compliant] sections non-compliant"
+       → Re-dispatch agent (see Step 2.3.3)
+       → CONTINUE loop
+
+END LOOP
+
+IF standards_compliance_iterations >= MAX_ITERATIONS AND non_compliant > 0:
+  → HARD BLOCK
+  → Update state with failure info
+  → Report to user: "Standards compliance failed after 3 attempts"
+  → STOP execution
+```
+
+### Step 2.3.3: Re-dispatch Agent for Compliance Fix
+
+```yaml
+Task tool:
+  subagent_type: "[same agent from TDD-GREEN]"
+  model: "opus"
+  description: "Fix missing Ring Standards for [unit_id] (attempt [N]/3)"
+  prompt: |
+    ⛔ STANDARDS NOT MET - Fix Required (Attempt [standards_compliance_iterations] of 3)
+    
+    Your Standards Coverage Table shows these sections as ❌:
+    [list ❌ sections extracted from table]
+    
+    WebFetch your standards file:
+    [URL for agent's standards - golang.md, typescript.md, etc.]
+    
+    Implement ALL missing sections.
+    Return updated Standards Coverage Table with ALL ✅ or N/A.
+    
+    Previous attempt summary:
+    - Total sections: [total_sections]
+    - Compliant: [compliant]
+    - Not applicable: [not_applicable]
+    - Non-compliant: [non_compliant]
+```
+
+### Step 2.3.4: Update State with Compliance Metrics
+
+```json
+gate_progress.implementation = {
+  "status": "completed",
+  "tdd_red": {...},
+  "tdd_green": {...},
+  "standards_verified": true,
+  "standards_compliance_iterations": [final count - e.g., 1, 2, or 3],
+  "standards_coverage": {
+    "total_sections": [N - from final successful verification],
+    "compliant": [N - sections with ✅],
+    "not_applicable": [N - sections with N/A],
+    "non_compliant": 0
+  }
+}
+```
+
+**Note:** `non_compliant` MUST be 0 when gate passes. If non-zero after 3 iterations, gate is BLOCKED.
+
+5. **Display to user:**
+   ```text
+   ┌─────────────────────────────────────────────────┐
+   │ ✓ GATE 0 COMPLETE                              │
+   ├─────────────────────────────────────────────────┤
+   │ TDD-RED:   [test_file] - FAIL captured ✓       │
+   │ TDD-GREEN: [impl_file] - PASS verified ✓       │
+   │ STANDARDS: [N]/[N] sections compliant ✓        │
+   │ ITERATIONS: [standards_compliance_iterations]   │
+   │                                                 │
+   │ Proceeding to Gate 1 (DevOps)...               │
+   └─────────────────────────────────────────────────┘
+   ```
+
+6. **⛔ SAVE STATE TO FILE (MANDATORY):**
    ```yaml
    Write tool:
      file_path: "docs/refactor/current-cycle.json"
@@ -1160,7 +1425,18 @@ See [shared-patterns/shared-orchestrator-principle.md](../shared-patterns/shared
    ```
    See "State Persistence Rule" section. State MUST be written to file after Gate 0.
 
-8. Proceed to Gate 1
+7. **Proceed to Gate 1**
+
+### Standards Compliance Anti-Rationalization
+
+| Rationalization | Why It's WRONG | Required Action |
+|-----------------|----------------|-----------------|
+| "Agent said implementation is complete" | Agent completion ≠ Standards compliance. Verify table. | **Parse and verify Standards Coverage Table** |
+| "Table wasn't in agent output" | Missing table = Incomplete output = Re-dispatch | **Re-dispatch agent to output table** |
+| "Only 1-2 sections are ❌" | ANY ❌ = BLOCKED. Count is irrelevant. | **Re-dispatch to fix ALL ❌ sections** |
+| "lib-commons is the main thing" | ALL sections are equally required. No prioritization. | **Verify ALL sections from standards-coverage-table.md** |
+| "Agent knows the standards" | Knowledge ≠ implementation. Evidence required. | **Check file:line evidence in table** |
+| "Standards verification is slow" | Verification prevents rework. 30 seconds vs hours. | **Always verify before proceeding** |
 
 ### TDD Sub-Phase Anti-Rationalization
 
